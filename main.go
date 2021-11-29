@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -18,26 +17,48 @@ func main() {
 		log.Fatal(err)
 	}
 
-	example := &Issue{
-		RepoID:       "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
-		Number:       4754,
-		count:        1,
-		lastAccessed: time.Now(),
+	example := []*DBEntry{
+		{
+			RepoID:       "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
+			Number:       4754,
+			count:        1,
+			lastAccessed: time.Now(),
+		},
+		{
+			RepoID:       "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
+			Number:       4567,
+			count:        1000000,
+			lastAccessed: time.Now(),
+		},
+		{
+			RepoID:       "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
+			Number:       4758,
+			count:        1,
+			lastAccessed: time.Now(),
+		},
 	}
 
 	if err := createTables(db); err != nil {
 		fmt.Println(err)
 	}
 
-	if err := InsertIssue(db, example); err != nil {
-		fmt.Println(err)
+	for _, issue := range example {
+		if err := InsertEntry(db, issue, "issues"); err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	entries, err := GetEntries(db, example[0].RepoID, "issues")
+	if err != nil {
+		fmt.Println("GET error: ", err)
 	}
 }
 
-var ErrNotExists = errors.New("sqlite error: row doesn't exist")
-
-type Issue struct {
+type DBEntry struct {
+	OwnerID      string
+	OwnerName    string
 	RepoID       string
+	RepoName     string
 	Number       int
 	lastAccessed time.Time
 	count        int
@@ -47,31 +68,60 @@ type Issue struct {
 // should be able to unify them
 
 //
-func InsertIssue(db *sql.DB, issue *Issue) error {
-	_, err := db.Exec(
-		"INSERT INTO issues values(?,?,?,?)",
-		issue.Number,
-		issue.count,
-		issue.lastAccessed,
-		issue.RepoID)
+func InsertEntry(db *sql.DB, entry *DBEntry, dataType string) error {
+	/**
+	* Check if the PR exist, if not insert it and proceed
+	*add the issue using the repoId
+	 */
 
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
+
+	query := fmt.Sprintf("INSERT INTO %s values(?,?,?,?)", dataType)
+	_, err = tx.Exec(
+		query,
+		entry.Number,
+		entry.count,
+		entry.lastAccessed.Unix(),
+		entry.RepoID)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	tx.Commit()
 	return nil
 }
 
-func GetIssue(db *sql.DB, repoId string, issueNumber int) (*Issue, error) {
-	row := db.QueryRow("SELECT lastAccessed,count FROM issues WHERE repoID = ? AND number = ?", repoId, issueNumber)
-
-	var issue Issue
-	if err := row.Scan(&issue.lastAccessed, &issue.count); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotExists
-		}
+// Get all issues or PRs under a repo
+func GetEntries(db *sql.DB, repoId string, dataType string) ([]*DBEntry, error) {
+	tx, err := db.Begin()
+	if err != nil {
 		return nil, err
 	}
-	return &issue, nil
+
+	query := fmt.Sprintf("SELECT number,lastAccessed,count FROM %s WHERE repoID = ?", dataType)
+	rows, err := tx.Query(query, repoId)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []*DBEntry
+	for rows.Next() {
+		var entry DBEntry
+		var unixTime int64
+		if err := rows.Scan(&entry.Number, &unixTime, &entry.count); err != nil {
+			return nil, err
+		}
+		entry.lastAccessed = time.Unix(unixTime, 0)
+		fmt.Printf("%+v\n", entry)
+		entries = append(entries, &entry)
+	}
+
+	tx.Commit()
+	return entries, nil
 }
 
 func createTables(db *sql.DB) error {
@@ -93,16 +143,16 @@ func createTables(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS issues(
 		number INTEGER PRIMARY KEY,
 		count INTEGER NOT NULL,
-		lastAccessed TEXT NOT NULL,
-		repoID TEXT NOT NULL UNIQUE,
+		lastAccessed INTEGER NOT NULL,
+		repoID TEXT NOT NULL,
 		FOREIGN KEY (repoID) REFERENCES repo(ID)
 	);
 
 	CREATE TABLE IF NOT EXISTS pullrequests(
 		number INTEGER PRIMARY KEY,
 		count INTEGER NOT NULL,
-		lastAccessed TEXT NOT NULL,
-		repoID TEXT NOT NULL UNIQUE,
+		lastAccessed INTEGER NOT NULL,
+		repoID TEXT NOT NULL,
 		FOREIGN KEY (repoID) REFERENCES repo(ID)
 	);`
 
