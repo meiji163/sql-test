@@ -48,7 +48,7 @@ func main() {
 		}
 	}
 
-	entries, err := GetEntries(db, example[0].RepoID, "issues")
+	_, err = GetEntries(db, example[0].RepoID, "issues")
 	if err != nil {
 		fmt.Println("GET error: ", err)
 	}
@@ -93,6 +93,40 @@ func InsertEntry(db *sql.DB, entry *DBEntry, dataType string) error {
 	}
 	tx.Commit()
 	return nil
+}
+
+func OwnerExists(db *sql.DB, ownerID string) (bool, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return false, err
+	}
+	query := fmt.Sprintf("SELECT id FROM owners WHERE id = '%s'", ownerID)
+	row := tx.QueryRow(query)
+	var id string
+	err = row.Scan(&id)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func RepoExists(db *sql.DB, repoID string) (bool, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return false, err
+	}
+	query := fmt.Sprintf("SELECT id FROM repos WHERE id = '%s'", repoID)
+	row := tx.QueryRow(query)
+	var id string
+	err = row.Scan(&id)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Get all issues or PRs under a repo
