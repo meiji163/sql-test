@@ -10,8 +10,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// transferred/deleted issues
-
 func main() {
 	db, err := sql.Open("sqlite3", "test.db")
 	if err != nil {
@@ -27,17 +25,20 @@ func main() {
 
 	example := []*DBEntry{
 		{
-			Number: 4754,
+			Number: 4827,
+			ID:     "I_kwDODKw3uc4_jzMw",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1, LastAccessed: time.Now()},
 		},
 		{
 			Number: 4567,
+			ID:     "I_kwDODKw3uc49blCN",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1000000, LastAccessed: time.Now()},
 		},
 		{
-			Number: 4758,
+			Number: 4746,
+			ID:     "I_kwDODKw3uc4-8U58",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1, LastAccessed: time.Now()},
 		},
@@ -72,8 +73,10 @@ func main() {
 
 // DBEntry is a frecency entry for a issue or PR
 // PRs are also issues, so we can store them in one table
+// IDs are the graphQL IDs
 type DBEntry struct {
-	Number int // the issue or PR ID
+	Number int
+	ID     string
 	Repo   Repository
 	Stats  CountEntry
 	IsPR   bool
@@ -84,7 +87,6 @@ type CountEntry struct {
 	Count        int
 }
 
-// IDs are the graphQL IDs
 type Repository struct {
 	OwnerID   string
 	OwnerName string
@@ -127,7 +129,8 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO issues values(?,?,?,?,?)",
+	_, err = tx.Exec("INSERT INTO issues values(?,?,?,?,?,?)",
+		entry.ID,
 		entry.Number,
 		entry.Stats.Count,
 		entry.Stats.LastAccessed.Unix(),
@@ -248,6 +251,7 @@ func createTables(db *sql.DB) error {
 	);
 	
 	CREATE TABLE IF NOT EXISTS issues(
+		id TEXT NOT NULL,
 		number INTEGER PRIMARY KEY,
 		count INTEGER NOT NULL,
 		lastAccessed INTEGER NOT NULL,
@@ -259,7 +263,7 @@ func createTables(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS 
-	recent ON issues(lastAccessed);
+	frecent ON issues(lastAccessed, count);
 	`
 	tx, err := db.Begin()
 	if err != nil {
