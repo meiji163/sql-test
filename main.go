@@ -260,13 +260,13 @@ func GetPullRequests(db *sql.DB, repoID string) ([]*DBEntry, error) {
 	return getEntries(db, repoID, 1)
 }
 
-func getEntries(db *sql.DB, repoID string, getPRs int) ([]*DBEntry, error) {
+func getEntries(db *sql.DB, repoID string, isPR int) ([]*DBEntry, error) {
 	query := `
 	SELECT number,lastAccessed,count,isPR,title FROM issues 
 		WHERE repoID = ? 
 		AND isPR = ?
 		ORDER BY lastAccessed DESC`
-	rows, err := db.Query(query, repoID, getPRs)
+	rows, err := db.Query(query, repoID, isPR)
 	if err != nil {
 		return nil, err
 	}
