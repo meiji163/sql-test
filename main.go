@@ -119,7 +119,21 @@ func UpdateEntry(db *sql.DB, updated *DBEntry) error {
 
 // Create new Issue/PR entry in database
 func InsertEntry(db *sql.DB, entry *DBEntry) error {
+
+	//insert the owner if it doesn't exist yet
+	ownerExists, err := OwnerExists(db, entry.Repo.OwnerID)
+	if err != nil {
+		return err
+	}
+	if !ownerExists {
+		InsertOwner(db, entry.Repo)
+	}
+
+	// insert the repo if it doesn't exist yet
 	repoExists, err := RepoExists(db, entry.Repo.ID)
+	if err != nil {
+		return err
+	}
 	if !repoExists {
 		InsertRepo(db, &entry.Repo)
 	}
@@ -136,6 +150,25 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		entry.Stats.LastAccessed.Unix(),
 		entry.Repo.ID,
 		entry.IsPR)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	tx.Commit()
+	return nil
+}
+
+func InsertOwner(db *sql.DB, repository Repository) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	//insert the owner if it doesn't exist yet
+	_, err = tx.Exec("INSERT INTO owners values(?,?)",
+		repository.OwnerID,
+		repository.OwnerName)
 
 	if err != nil {
 		tx.Rollback()
