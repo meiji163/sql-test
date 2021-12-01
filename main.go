@@ -17,27 +17,32 @@ func main() {
 	}
 
 	cliRepo := Repository{
-		OwnerName: "cli",
-		OwnerID:   "MDEyOk9yZ2FuaXphdGlvbjU5NzA0NzEx",
-		Name:      "cli",
-		ID:        "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
+		OwnerName:        "cli",
+		OwnerID:          "MDEyOk9yZ2FuaXphdGlvbjU5NzA0NzEx",
+		Name:             "cli",
+		ID:               "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
+		lastUpdatedIssue: time.Now(),
 	}
 
 	example := []*DBEntry{
 		{
 			Number: 4827,
+			Title:  "Add a --no-color flag to the cli",
 			ID:     "I_kwDODKw3uc4_jzMw",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1, LastAccessed: time.Now()},
 		},
 		{
 			Number: 4567,
+			Title:  "Add a color flag to the cli",
 			ID:     "I_kwDODKw3uc49blCN",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1000000, LastAccessed: time.Now()},
+			IsPR:   true,
 		},
 		{
 			Number: 4746,
+			Title:  "Don't use the --no-color flag",
 			ID:     "I_kwDODKw3uc4-8U58",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1, LastAccessed: time.Now()},
@@ -62,16 +67,29 @@ func main() {
 		log.Fatal(err)
 	}
 
-	_, err = GetIssues(db, cliRepo.ID)
+	issues, err := GetIssues(db, cliRepo.ID)
 	if err != nil {
 		log.Fatal("GET error: ", err)
 	}
 
-	exists, err := RepoExists(db, "asd;lkfja;lsd")
+	for _, issue := range issues {
+		fmt.Printf("%+v\n", issue)
+	}
+
+	prs, err := GetPullRequests(db, cliRepo.ID)
 	if err != nil {
 		log.Fatal("GET error: ", err)
 	}
-	fmt.Println(exists)
+
+	for _, pr := range prs {
+		fmt.Printf("%+v\n", pr)
+	}
+
+	// exists, err := RepoExists(db, "asd;lkfja;lsd")
+	// if err != nil {
+	// 	log.Fatal("GET error: ", err)
+	// }
+	// fmt.Println(exists)
 }
 
 // DBEntry is a frecency entry for a issue or PR
@@ -79,6 +97,7 @@ func main() {
 // IDs are the graphQL IDs
 type DBEntry struct {
 	Number int
+	Title  string
 	ID     string
 	Repo   Repository
 	Stats  CountEntry
@@ -91,10 +110,11 @@ type CountEntry struct {
 }
 
 type Repository struct {
-	OwnerID   string
-	OwnerName string
-	ID        string
-	Name      string
+	OwnerID          string
+	OwnerName        string
+	ID               string
+	lastUpdatedIssue time.Time
+	Name             string
 }
 
 // Update the entry's timestamp and frequency count
@@ -152,8 +172,9 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO issues values(?,?,?,?,?,?)",
+	_, err = tx.Exec("INSERT INTO issues values(?,?,?,?,?,?,?)",
 		entry.ID,
+		entry.Title,
 		entry.Number,
 		entry.Stats.Count,
 		entry.Stats.LastAccessed.Unix(),
@@ -192,7 +213,7 @@ func InsertRepo(db *sql.DB, repo *Repository) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("INSERT INTO repos values(?,?,?)", repo.ID, repo.Name, repo.OwnerID)
+	_, err = tx.Exec("INSERT INTO repos values(?,?,?,?)", repo.ID, repo.Name, repo.OwnerID, repo.lastUpdatedIssue.Unix())
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -241,7 +262,7 @@ func GetPullRequests(db *sql.DB, repoID string) ([]*DBEntry, error) {
 
 func getEntries(db *sql.DB, repoID string, getPRs int) ([]*DBEntry, error) {
 	query := `
-	SELECT number,lastAccessed,count,isPR FROM issues 
+	SELECT number,lastAccessed,count,isPR,title FROM issues 
 		WHERE repoID = ? 
 		AND isPR = ?
 		ORDER BY lastAccessed DESC`
@@ -254,11 +275,10 @@ func getEntries(db *sql.DB, repoID string, getPRs int) ([]*DBEntry, error) {
 	for rows.Next() {
 		entry := DBEntry{}
 		var unixTime int64
-		if err := rows.Scan(&entry.Number, &unixTime, &entry.Stats.Count, &entry.IsPR); err != nil {
+		if err := rows.Scan(&entry.Number, &unixTime, &entry.Stats.Count, &entry.IsPR, &entry.Title); err != nil {
 			return nil, err
 		}
 		entry.Stats.LastAccessed = time.Unix(unixTime, 0)
-		fmt.Printf("%+v\n", entry)
 		entries = append(entries, &entry)
 	}
 
@@ -276,18 +296,18 @@ func createTables(db *sql.DB) error {
  		id TEXT PRIMARY KEY,
  		name TEXT NOT NULL,
 		ownerID TEXT NOT NULL UNIQUE, 
+		lastUpdatedIssue INTEGER NOT NULL,
  		FOREIGN KEY (ownerID) REFERENCES owner(id)
 	);
 	
 	CREATE TABLE IF NOT EXISTS issues(
 		id TEXT NOT NULL,
+		title TEXT NOT NULL,
 		number INTEGER PRIMARY KEY,
 		count INTEGER NOT NULL,
 		lastAccessed INTEGER NOT NULL,
 		repoID TEXT NOT NULL,
-		isPR BOOLEAN NOT NULL 
-			CHECK (isPR IN (0, 1)) 
-			DEFAULT 0,
+		isPR BOOLEAN NOT NULL DEFAULT 0,
 		FOREIGN KEY (repoID) REFERENCES repo(ID)
 	);
 
@@ -298,7 +318,6 @@ func createTables(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-
 	if _, err = tx.Exec(query); err != nil {
 		tx.Rollback()
 		return err
