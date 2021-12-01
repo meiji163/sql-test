@@ -133,7 +133,8 @@ func UpdateEntry(db *sql.DB, updated *DBEntry) error {
 		updated.Number)
 
 	if err != nil {
-		return tx.Rollback()
+		tx.Rollback()
+		return err
 	}
 	tx.Commit()
 	return nil
@@ -181,7 +182,8 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		entry.IsPR)
 
 	if err != nil {
-		return tx.Rollback()
+		tx.Rollback()
+		return err
 	}
 	tx.Commit()
 	return nil
@@ -199,7 +201,8 @@ func InsertOwner(db *sql.DB, repository Repository) error {
 		repository.OwnerName)
 
 	if err != nil {
-		return tx.Rollback()
+		tx.Rollback()
+		return err
 	}
 	tx.Commit()
 	return nil
@@ -212,7 +215,8 @@ func InsertRepo(db *sql.DB, repo *Repository) error {
 	}
 	_, err = tx.Exec("INSERT INTO repos values(?,?,?,?)", repo.ID, repo.Name, repo.OwnerID, repo.lastUpdatedIssue.Unix())
 	if err != nil {
-		return tx.Rollback()
+		tx.Rollback()
+		return err
 	}
 	tx.Commit()
 	return nil
@@ -256,13 +260,13 @@ func GetPullRequests(db *sql.DB, repoID string) ([]*DBEntry, error) {
 	return getEntries(db, repoID, 1)
 }
 
-func getEntries(db *sql.DB, repoID string, IsPR int) ([]*DBEntry, error) {
+func getEntries(db *sql.DB, repoID string, getPRs int) ([]*DBEntry, error) {
 	query := `
 	SELECT number,lastAccessed,count,isPR,title FROM issues 
 		WHERE repoID = ? 
 		AND isPR = ?
 		ORDER BY lastAccessed DESC`
-	rows, err := db.Query(query, repoID, IsPR)
+	rows, err := db.Query(query, repoID, getPRs)
 	if err != nil {
 		return nil, err
 	}
