@@ -68,6 +68,9 @@ func main() {
 	}
 
 	exists, err := RepoExists(db, "asd;lkfja;lsd")
+	if err != nil {
+		log.Fatal("GET error: ", err)
+	}
 	fmt.Println(exists)
 }
 
@@ -120,7 +123,7 @@ func UpdateEntry(db *sql.DB, updated *DBEntry) error {
 // Create new Issue/PR entry in database
 func InsertEntry(db *sql.DB, entry *DBEntry) error {
 
-	//insert the owner if it doesn't exist yet
+	// insert the owner if it doesn't exist yet
 	ownerExists, err := OwnerExists(db, entry.Repo.OwnerID)
 	if err != nil {
 		return err
@@ -185,18 +188,18 @@ func InsertRepo(db *sql.DB, repo *Repository) error {
 	}
 
 	// insert the owner entry if it doesn't exist yet
-	ownerExists, err := OwnerExists(db, repo.OwnerID)
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	if !ownerExists {
-		_, err = tx.Exec("INSERT INTO owners values(?,?)", repo.OwnerName, repo.ID)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-	}
+	// ownerExists, err := OwnerExists(db, repo.OwnerID)
+	// if err != nil {
+	// 	tx.Rollback()
+	// 	return err
+	// }
+	// if !ownerExists {
+	// 	_, err = tx.Exec("INSERT INTO owners values(?,?)", repo.OwnerName, repo.ID)
+	// 	if err != nil {
+	// 		tx.Rollback()
+	// 		return err
+	// 	}
+	// }
 
 	_, err = tx.Exec("INSERT INTO repos values(?,?,?)", repo.ID, repo.Name, repo.OwnerID)
 	if err != nil {
@@ -208,8 +211,9 @@ func InsertRepo(db *sql.DB, repo *Repository) error {
 }
 
 func OwnerExists(db *sql.DB, ownerID string) (bool, error) {
-	row := db.QueryRow("SELECT 1 FROM owners WHERE id = ? LIMIT 1", ownerID)
-	err := row.Scan()
+	row := db.QueryRow("SELECT id FROM owners WHERE id = ? LIMIT 1", ownerID)
+	var id string
+	err := row.Scan(&id)
 	if err == nil {
 		return true, nil
 	}
@@ -221,16 +225,17 @@ func OwnerExists(db *sql.DB, ownerID string) (bool, error) {
 }
 
 func RepoExists(db *sql.DB, repoID string) (bool, error) {
-	row := db.QueryRow("SELECT 1 FROM repos WHERE id = ? LIMIT 1", repoID)
-	err := row.Scan()
+	row := db.QueryRow("SELECT id FROM repos WHERE id = ?", repoID)
+	var id string
+	err := row.Scan(&id)
 	if err == nil {
 		return true, nil
 	}
-
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	return false, err
+
 }
 
 // Retrieve all issues under the repo with given ID
