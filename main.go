@@ -129,7 +129,10 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 	if !ownerExists {
-		InsertOwner(db, entry.Repo)
+		err := InsertOwner(db, entry.Repo)
+		if err != nil {
+			return err
+		}
 	}
 
 	// insert the repo if it doesn't exist yet
@@ -138,7 +141,10 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 	if !repoExists {
-		InsertRepo(db, &entry.Repo)
+		err := InsertRepo(db, &entry.Repo)
+		if err != nil {
+			return err
+		}
 	}
 
 	tx, err := db.Begin()
@@ -186,21 +192,6 @@ func InsertRepo(db *sql.DB, repo *Repository) error {
 	if err != nil {
 		return err
 	}
-
-	// insert the owner entry if it doesn't exist yet
-	// ownerExists, err := OwnerExists(db, repo.OwnerID)
-	// if err != nil {
-	// 	tx.Rollback()
-	// 	return err
-	// }
-	// if !ownerExists {
-	// 	_, err = tx.Exec("INSERT INTO owners values(?,?)", repo.OwnerName, repo.ID)
-	// 	if err != nil {
-	// 		tx.Rollback()
-	// 		return err
-	// 	}
-	// }
-
 	_, err = tx.Exec("INSERT INTO repos values(?,?,?)", repo.ID, repo.Name, repo.OwnerID)
 	if err != nil {
 		tx.Rollback()
