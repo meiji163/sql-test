@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func main() {
+	os.Remove("test.db")
 	db, err := sql.Open("sqlite3", "test.db")
 	if err != nil {
 		log.Fatal(err)
@@ -49,7 +51,7 @@ func main() {
 	}
 
 	if err := createTables(db); err != nil {
-		log.Fatal(err)
+		log.Fatal("CREATE ERROR: ", err)
 	}
 
 	for _, issue := range example {
@@ -107,7 +109,6 @@ type CountEntry struct {
 	LastAccessed time.Time
 	Count        int
 }
-
 type Repository struct {
 	OwnerID           string
 	OwnerName         string
@@ -123,14 +124,20 @@ func UpdateEntry(db *sql.DB, updated *DBEntry) error {
 	if err != nil {
 		return err
 	}
-	stats := updated.Stats
-	_, err = tx.Exec(
-		"UPDATE issues SET lastAccessed = ?, count = ? WHERE repoId = ? AND number = ?",
-		stats.LastAccessed.Unix(),
-		stats.Count,
+
+	statement, err := tx.Prepare("UPDATE issues SET lastAccessed = ?, count = ? WHERE repoId = ? AND number = ?")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	defer statement.Close()
+
+	_, err = statement.Exec(
+		updated.Stats.LastAccessed.Unix(),
+		updated.Stats.Count,
 		updated.Repo.ID,
 		updated.Number)
-
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -170,7 +177,14 @@ func insertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO issues values(?,?,?,?,?,?,?)",
+	stmt, err := tx.Prepare("INSERT INTO issues(gqlID,title,number,count,lastAccessed,repoID,isPR) values(?,?,?,?,?,?,?)")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	defer stmt.Close()
+	_, err = stmt.Exec(
 		entry.ID,
 		entry.Title,
 		entry.Number,
@@ -193,12 +207,20 @@ func insertOwner(db *sql.DB, repository Repository) error {
 		return err
 	}
 
-	//insert the owner if it doesn't exist yet
-	_, err = tx.Exec("INSERT INTO owners values(?,?)", repository.OwnerID, repository.OwnerName)
+	statement, err := tx.Prepare("INSERT INTO owners(gqlID,name) values(?,?)")
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
+
+	defer statement.Close()
+	_, err = statement.Exec(repository.OwnerID, repository.OwnerName)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	tx.Commit()
 	return nil
 }
@@ -208,17 +230,27 @@ func insertRepo(db *sql.DB, repo *Repository) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("INSERT INTO repos(id,name,ownerID) values(?,?,?)", repo.ID, repo.Name, repo.OwnerID)
+
+	statement, err := tx.Prepare("INSERT INTO repos(gqlID,name,ownerID) values(?,?,?)")
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
+
+	defer statement.Close()
+
+	_, err = statement.Exec(repo.ID, repo.Name, repo.OwnerID)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	tx.Commit()
 	return nil
 }
 
 func OwnerExists(db *sql.DB, ownerID string) (bool, error) {
-	row := db.QueryRow("SELECT id FROM owners WHERE id = ? LIMIT 1", ownerID)
+	row := db.QueryRow("SELECT id FROM owners WHERE gqlID = ?", ownerID)
 	var id string
 	err := row.Scan(&id)
 	if err == nil {
@@ -232,8 +264,8 @@ func OwnerExists(db *sql.DB, ownerID string) (bool, error) {
 }
 
 func RepoExists(db *sql.DB, repoID string) (bool, error) {
-	row := db.QueryRow("SELECT id FROM repos WHERE id = ?", repoID)
 	var id string
+	row := db.QueryRow("SELECT id FROM repos WHERE gqlID = ?", repoID)
 	err := row.Scan(&id)
 	if err == nil {
 		return true, nil
@@ -282,28 +314,31 @@ func getEntries(db *sql.DB, repoID string, isPR int) ([]*DBEntry, error) {
 func createTables(db *sql.DB) error {
 	query := `
 	CREATE TABLE IF NOT EXISTS owners( 
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL UNIQUE 	 
+		id INTEGER PRIMARY KEY AUTOINCREMENT, 
+		gqlID TEXT NOT NULL UNIQUE,
+		name TEXT NOT NULL 
 	);
 
 	CREATE TABLE IF NOT EXISTS repos(
- 		id TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT, 
+ 		gqlID TEXT NOT NULL UNIQUE,
  		name TEXT NOT NULL,
-		ownerID TEXT NOT NULL UNIQUE, 
+		ownerID TEXT NOT NULL, 
 		issuesLastQueried INTEGER,
 		prsLastQueried INTEGER,
- 		FOREIGN KEY (ownerID) REFERENCES owner(id)
+ 		FOREIGN KEY (ownerID) REFERENCES owners(gqlID)
 	);
 	
 	CREATE TABLE IF NOT EXISTS issues(
-		id TEXT NOT NULL,
+		id INTEGER PRIMARY KEY AUTOINCREMENT, 
+		gqlID TEXT NOT NULL UNIQUE,
 		title TEXT NOT NULL,
-		number INTEGER PRIMARY KEY,
+		number INTEGER NOT NULL,
 		count INTEGER NOT NULL,
 		lastAccessed INTEGER NOT NULL,
 		repoID TEXT NOT NULL,
 		isPR BOOLEAN NOT NULL DEFAULT 0,
-		FOREIGN KEY (repoID) REFERENCES repo(ID)
+		FOREIGN KEY (repoID) REFERENCES repo(gqlID)
 	);
 
 	CREATE INDEX IF NOT EXISTS 
@@ -314,9 +349,9 @@ func createTables(db *sql.DB) error {
 		return err
 	}
 	if _, err = tx.Exec(query); err != nil {
-		tx.Rollback()
 		return err
 	}
+
 	tx.Commit()
-	return err
+	return nil
 }
