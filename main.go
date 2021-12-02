@@ -17,24 +17,23 @@ func main() {
 	}
 
 	cliRepo := Repository{
-		OwnerName:        "cli",
-		OwnerID:          "MDEyOk9yZ2FuaXphdGlvbjU5NzA0NzEx",
-		Name:             "cli",
-		ID:               "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
-		lastUpdatedIssue: time.Now(),
+		OwnerName: "cli",
+		OwnerID:   "MDEyOk9yZ2FuaXphdGlvbjU5NzA0NzEx",
+		Name:      "cli",
+		ID:        "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk",
 	}
 
 	example := []*DBEntry{
 		{
 			Number: 4827,
-			Title:  "Add a --no-color flag to the cli",
+			Title:  "Allow `auth status` to have reduced scope requirements",
 			ID:     "I_kwDODKw3uc4_jzMw",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1, LastAccessed: time.Now()},
 		},
 		{
 			Number: 4567,
-			Title:  "Add a color flag to the cli",
+			Title:  "repo create rewrite",
 			ID:     "I_kwDODKw3uc49blCN",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1000000, LastAccessed: time.Now()},
@@ -42,7 +41,7 @@ func main() {
 		},
 		{
 			Number: 4746,
-			Title:  "Don't use the --no-color flag",
+			Title:  "`gh browse` can't handle gist repos",
 			ID:     "I_kwDODKw3uc4-8U58",
 			Repo:   cliRepo,
 			Stats:  CountEntry{Count: 1, LastAccessed: time.Now()},
@@ -54,7 +53,7 @@ func main() {
 	}
 
 	for _, issue := range example {
-		if err := InsertEntry(db, issue); err != nil {
+		if err := insertEntry(db, issue); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -110,11 +109,12 @@ type CountEntry struct {
 }
 
 type Repository struct {
-	OwnerID          string
-	OwnerName        string
-	ID               string
-	lastUpdatedIssue time.Time
-	Name             string
+	OwnerID           string
+	OwnerName         string
+	ID                string
+	Name              string
+	IssuesLastQueried time.Time // the last time issues/PRs were fetched
+	PRsLastQueried    time.Time
 }
 
 // Update the entry's timestamp and frequency count
@@ -123,10 +123,9 @@ func UpdateEntry(db *sql.DB, updated *DBEntry) error {
 	if err != nil {
 		return err
 	}
-	query := "UPDATE issues SET lastAccessed = ?, count = ? WHERE repoId = ? AND number = ?"
 	stats := updated.Stats
 	_, err = tx.Exec(
-		query,
+		"UPDATE issues SET lastAccessed = ?, count = ? WHERE repoId = ? AND number = ?",
 		stats.LastAccessed.Unix(),
 		stats.Count,
 		updated.Repo.ID,
@@ -141,7 +140,7 @@ func UpdateEntry(db *sql.DB, updated *DBEntry) error {
 }
 
 // Create new Issue/PR entry in database
-func InsertEntry(db *sql.DB, entry *DBEntry) error {
+func insertEntry(db *sql.DB, entry *DBEntry) error {
 
 	// insert the owner if it doesn't exist yet
 	ownerExists, err := OwnerExists(db, entry.Repo.OwnerID)
@@ -149,8 +148,7 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 	if !ownerExists {
-		err := InsertOwner(db, entry.Repo)
-		if err != nil {
+		if err := insertOwner(db, entry.Repo); err != nil {
 			return err
 		}
 	}
@@ -161,7 +159,7 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 		return err
 	}
 	if !repoExists {
-		err := InsertRepo(db, &entry.Repo)
+		err := insertRepo(db, &entry.Repo)
 		if err != nil {
 			return err
 		}
@@ -189,17 +187,14 @@ func InsertEntry(db *sql.DB, entry *DBEntry) error {
 	return nil
 }
 
-func InsertOwner(db *sql.DB, repository Repository) error {
+func insertOwner(db *sql.DB, repository Repository) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 
 	//insert the owner if it doesn't exist yet
-	_, err = tx.Exec("INSERT INTO owners values(?,?)",
-		repository.OwnerID,
-		repository.OwnerName)
-
+	_, err = tx.Exec("INSERT INTO owners values(?,?)", repository.OwnerID, repository.OwnerName)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -208,12 +203,12 @@ func InsertOwner(db *sql.DB, repository Repository) error {
 	return nil
 }
 
-func InsertRepo(db *sql.DB, repo *Repository) error {
+func insertRepo(db *sql.DB, repo *Repository) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("INSERT INTO repos values(?,?,?,?)", repo.ID, repo.Name, repo.OwnerID, repo.lastUpdatedIssue.Unix())
+	_, err = tx.Exec("INSERT INTO repos(id,name,ownerID) values(?,?,?)", repo.ID, repo.Name, repo.OwnerID)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -247,7 +242,6 @@ func RepoExists(db *sql.DB, repoID string) (bool, error) {
 		return false, nil
 	}
 	return false, err
-
 }
 
 // Retrieve all issues under the repo with given ID
@@ -296,7 +290,8 @@ func createTables(db *sql.DB) error {
  		id TEXT PRIMARY KEY,
  		name TEXT NOT NULL,
 		ownerID TEXT NOT NULL UNIQUE, 
-		lastUpdatedIssue INTEGER NOT NULL,
+		issuesLastQueried INTEGER,
+		prsLastQueried INTEGER,
  		FOREIGN KEY (ownerID) REFERENCES owner(id)
 	);
 	
